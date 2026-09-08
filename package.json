@@ -1,0 +1,15 @@
+{
+  "name": "mock-trading-desk",
+  "version": "1.0.0",
+  "description": "가상 잔고로 국내·해외 주식을 연습하는 모의투자 웹앱",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server/dev.js",
+    "start": "node server/dev.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "yahoo-finance2": "^4.0.2"
+  }
+}
