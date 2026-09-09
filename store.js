@@ -1,6 +1,11 @@
-// 잔고·보유종목·거래내역·관심종목을 이 브라우저에 저장합니다.
-// 방문자마다 각자의 데이터를 가지며, 서로 섞이지 않습니다.
-// (서버는 시세만 대신 불러다 주고, 아무것도 저장하지 않습니다)
+// 잔고·보유종목·거래내역·관심종목을 보관합니다.
+//
+// 저장 위치는 두 가지입니다.
+//  - 게스트(로그인 안 함): 이 브라우저에만 저장 (localStorage)
+//  - 로그인함: Supabase 계정에 저장 → PC·휴대폰 어디서 접속해도 같은 잔고
+//
+// 화면(app.js)에서 부르는 함수들은 전부 동기(바로 값이 나옴)이고,
+// 저장만 뒤에서 조용히 일어납니다.
 window.Store = (function () {
   "use strict";
 
@@ -9,6 +14,7 @@ window.Store = (function () {
   const INITIAL_CASH = 10000000;
   const TX_LIMIT = 100;
   const MAX_ITEMS = 40;
+  const SNAPSHOT_VERSION = 1;
 
   const DEFAULT_WATCHLIST = [
     { symbol: "KR:005930", code: "005930", market: "KR", currency: "KRW", yahooSymbol: "005930.KS", name: "삼성전자", sector: "코스피" },
@@ -53,44 +59,161 @@ window.Store = (function () {
       console.warn("저장 실패:", err);
     }
   }
+  function removeRaw(key) {
+    if (!storageWorks) {
+      delete memoryFallback[key];
+      return;
+    }
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* 무시 */
+    }
+  }
 
   function emptyPortfolio() {
     return { cash: INITIAL_CASH, initialCash: INITIAL_CASH, holdings: {}, transactions: [] };
   }
 
-  function loadPortfolio() {
+  function normalizePortfolio(parsed) {
+    if (!parsed || typeof parsed !== "object") return emptyPortfolio();
+    return {
+      cash: typeof parsed.cash === "number" ? parsed.cash : INITIAL_CASH,
+      initialCash: typeof parsed.initialCash === "number" ? parsed.initialCash : INITIAL_CASH,
+      holdings: parsed.holdings && typeof parsed.holdings === "object" ? parsed.holdings : {},
+      transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
+    };
+  }
+
+  function normalizeWatchlist(parsed) {
+    if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_WATCHLIST.slice();
+    const cleaned = parsed.filter((it) => it && it.symbol && it.yahooSymbol && it.name);
+    return cleaned.length ? cleaned : DEFAULT_WATCHLIST.slice();
+  }
+
+  function loadLocalPortfolio() {
     try {
-      const parsed = JSON.parse(readRaw(KEY_PORTFOLIO));
-      if (!parsed || typeof parsed !== "object") return emptyPortfolio();
-      return {
-        cash: typeof parsed.cash === "number" ? parsed.cash : INITIAL_CASH,
-        initialCash: typeof parsed.initialCash === "number" ? parsed.initialCash : INITIAL_CASH,
-        holdings: parsed.holdings && typeof parsed.holdings === "object" ? parsed.holdings : {},
-        transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
-      };
+      return normalizePortfolio(JSON.parse(readRaw(KEY_PORTFOLIO)));
     } catch {
       return emptyPortfolio();
     }
   }
-
-  function loadWatchlist() {
+  function loadLocalWatchlist() {
     try {
-      const parsed = JSON.parse(readRaw(KEY_WATCHLIST));
-      if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_WATCHLIST.slice();
-      return parsed.filter((it) => it && it.symbol && it.yahooSymbol && it.name);
+      return normalizeWatchlist(JSON.parse(readRaw(KEY_WATCHLIST)));
     } catch {
       return DEFAULT_WATCHLIST.slice();
     }
   }
 
-  let portfolio = loadPortfolio();
-  let watchlist = loadWatchlist();
+  let portfolio = loadLocalPortfolio();
+  let watchlist = loadLocalWatchlist();
 
-  function savePortfolio() {
-    writeRaw(KEY_PORTFOLIO, JSON.stringify(portfolio));
+  // ── 저장 위치 ──────────────────────────────────────────────
+  let mode = "local"; // "local" | "cloud"
+  let cloudSaver = null; // async (snapshot) => void
+  let syncState = "idle"; // "idle" | "saving" | "saved" | "error"
+  let syncListener = null;
+  let saveTimer = null;
+  let pendingSave = false;
+
+  function setSync(next) {
+    if (syncState === next) return;
+    syncState = next;
+    if (syncListener) {
+      try {
+        syncListener(next);
+      } catch {
+        /* 화면 갱신 실패는 무시 */
+      }
+    }
   }
-  function saveWatchlist() {
-    writeRaw(KEY_WATCHLIST, JSON.stringify(watchlist));
+
+  function snapshot() {
+    return { v: SNAPSHOT_VERSION, portfolio, watchlist };
+  }
+
+  async function runCloudSave() {
+    if (!cloudSaver) return;
+    pendingSave = false;
+    setSync("saving");
+    try {
+      await cloudSaver(snapshot());
+      setSync(pendingSave ? "saving" : "saved");
+    } catch (err) {
+      console.warn("계정 저장 실패:", err);
+      setSync("error");
+    }
+  }
+
+  // 어떤 값이든 바뀌면 호출됩니다. 게스트면 브라우저에, 로그인 상태면 계정에 저장합니다.
+  function persist() {
+    if (mode === "local") {
+      writeRaw(KEY_PORTFOLIO, JSON.stringify(portfolio));
+      writeRaw(KEY_WATCHLIST, JSON.stringify(watchlist));
+      return;
+    }
+    pendingSave = true;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(runCloudSave, 700); // 연속 조작은 한 번으로 묶어서 저장
+  }
+
+  // 페이지를 떠나기 전에 밀린 저장을 밀어 넣습니다.
+  function flush() {
+    if (mode === "cloud" && pendingSave) {
+      clearTimeout(saveTimer);
+      return runCloudSave();
+    }
+    return Promise.resolve();
+  }
+
+  // ── 계정 연동 ──────────────────────────────────────────────
+  // 게스트 상태에서 뭔가라도 했는지 (계정으로 옮길 값이 있는지) 판단
+  function hasActivity() {
+    if (portfolio.transactions.length > 0) return true;
+    if (portfolio.cash !== INITIAL_CASH) return true;
+    if (Object.keys(portfolio.holdings).length > 0) return true;
+    if (watchlist.length !== DEFAULT_WATCHLIST.length) return true;
+    const defaults = DEFAULT_WATCHLIST.map((s) => s.symbol).join(",");
+    return watchlist.map((s) => s.symbol).join(",") !== defaults;
+  }
+
+  function getSnapshot() {
+    return JSON.parse(JSON.stringify(snapshot()));
+  }
+
+  function applySnapshot(snap) {
+    portfolio = normalizePortfolio(snap && snap.portfolio);
+    watchlist = normalizeWatchlist(snap && snap.watchlist);
+  }
+
+  function startFresh() {
+    portfolio = emptyPortfolio();
+    watchlist = DEFAULT_WATCHLIST.slice();
+  }
+
+  // 로그인 성공 후 호출. saver 는 스냅샷을 계정에 저장하는 함수입니다.
+  function useCloud(saver) {
+    mode = "cloud";
+    cloudSaver = saver;
+    setSync("idle");
+  }
+
+  // 로그아웃 후 호출. 브라우저에 저장돼 있던 게스트 데이터로 되돌아갑니다.
+  function useLocal() {
+    mode = "local";
+    cloudSaver = null;
+    clearTimeout(saveTimer);
+    pendingSave = false;
+    setSync("idle");
+    portfolio = loadLocalPortfolio();
+    watchlist = loadLocalWatchlist();
+  }
+
+  // 게스트 기록을 계정으로 옮긴 뒤, 브라우저에 남은 사본을 비웁니다.
+  function clearLocal() {
+    removeRaw(KEY_PORTFOLIO);
+    removeRaw(KEY_WATCHLIST);
   }
 
   // ── 관심종목 ────────────────────────────────────────────────
@@ -104,7 +227,7 @@ window.Store = (function () {
     if (watchlist.length >= MAX_ITEMS) throw new Error("WATCHLIST_FULL");
     if (findBySymbol(item.symbol)) throw new Error("ALREADY_EXISTS");
     watchlist.push(item);
-    saveWatchlist();
+    persist();
     return item;
   }
   function removeItem(symbol) {
@@ -112,7 +235,7 @@ window.Store = (function () {
     const held = portfolio.holdings[symbol];
     if (held && held.qty > 0) throw new Error("STILL_HOLDING");
     watchlist = watchlist.filter((s) => s.symbol !== symbol);
-    saveWatchlist();
+    persist();
   }
 
   // ── 매매 ───────────────────────────────────────────────────
@@ -156,7 +279,7 @@ window.Store = (function () {
     });
     if (portfolio.transactions.length > TX_LIMIT) portfolio.transactions.length = TX_LIMIT;
 
-    savePortfolio();
+    persist();
   }
 
   function getHoldingQty(symbol) {
@@ -209,7 +332,7 @@ window.Store = (function () {
 
   function reset() {
     portfolio = emptyPortfolio();
-    savePortfolio();
+    persist();
   }
 
   return {
@@ -225,5 +348,19 @@ window.Store = (function () {
     computePortfolio,
     getTransactions,
     reset,
+    // 계정 연동용
+    getSnapshot,
+    applySnapshot,
+    startFresh,
+    hasActivity,
+    useCloud,
+    useLocal,
+    clearLocal,
+    flush,
+    getMode: () => mode,
+    getSyncState: () => syncState,
+    onSync: (cb) => {
+      syncListener = cb;
+    },
   };
 })();

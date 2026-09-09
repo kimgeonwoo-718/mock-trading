@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 // 로컬에서는 프로젝트 루트의 정적 파일을 그대로 서빙합니다 (Vercel과 동일한 구조)
 const ROOT = path.join(__dirname, "..");
-["/index.html", "/app.js", "/store.js", "/styles.css"].forEach((f) => {
+["/index.html", "/app.js", "/store.js", "/auth.js", "/config.js", "/styles.css", "/privacy.html", "/terms.html"].forEach((f) => {
   app.get(f, (req, res) => res.sendFile(path.join(ROOT, f)));
 });
 app.get("/", (req, res) => res.sendFile(path.join(ROOT, "index.html")));
