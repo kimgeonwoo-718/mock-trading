@@ -28,6 +28,8 @@
   let modal = { open: false, symbol: null, tab: "buy", qty: 1, error: "" };
   let addModal = { open: false, market: "KR", code: "", name: "", busy: false, error: "" };
   let manageMode = false;
+  let watchExpanded = false; // 관심종목 전체 보기 여부
+  const COLLAPSED_COUNT = 5; // 기본으로 보여줄 종목 수
 
   // ── 화면 모드 (자동 / 밝게 / 어둡게) ───────────────────────
   const THEME_KEY = "mockTrading.theme.v1";
@@ -300,7 +302,12 @@
   }
 
   function renderWatchlist() {
-    const rows = quotes.map((s) => {
+    // 기본은 5개만. 편집 중일 때는 전체를 보여줍니다.
+    const showAll = watchExpanded || manageMode;
+    const visible = showAll ? quotes : quotes.slice(0, COLLAPSED_COUNT);
+    const canCollapse = quotes.length > COLLAPSED_COUNT && !manageMode;
+
+    const rows = visible.map((s) => {
       // 전일 종가 대비 등락률 (Yahoo 제공값 우선)
       const chgPct = s.changePercent != null
         ? s.changePercent
@@ -334,7 +341,15 @@
         "</div></div>" +
       '<div class="panel-body"><table class="watch-table"><thead><tr><th>종목</th><th>추이</th>' +
         '<th class="th-num">현재가 / 등락률</th><th class="th-num">' + (manageMode ? "관리" : "주문") + "</th>" +
-      "</tr></thead><tbody>" + rows + "</tbody></table></div></section>";
+      "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
+      (canCollapse
+        ? '<div class="list-more">' +
+            (showAll ? "" : '<div class="fade-mask" aria-hidden="true"></div>') +
+            '<button class="btn more-btn" id="expandBtn">' +
+              (showAll ? "접기" : "전체 보기 (" + quotes.length + "개)") +
+            "</button></div>"
+        : "") +
+      "</section>";
   }
 
   function renderPortfolio() {
@@ -518,6 +533,17 @@
       render();
       const el = document.getElementById("addCode");
       if (el) el.focus();
+    });
+
+    const expandBtn = document.getElementById("expandBtn");
+    if (expandBtn) expandBtn.addEventListener("click", () => {
+      watchExpanded = !watchExpanded;
+      render();
+      if (!watchExpanded) {
+        // 접을 때는 관심종목 위쪽이 보이도록
+        const panel = document.querySelector(".panel-watch");
+        if (panel) panel.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
     });
 
     const manageBtn = document.getElementById("manageBtn");
