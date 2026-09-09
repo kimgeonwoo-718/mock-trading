@@ -14,6 +14,6 @@
 //  * 비워두면 로그인 기능만 꺼진 채로, 지금처럼 브라우저 저장으로 잘 동작합니다.
 // ─────────────────────────────────────────────────────────────
 window.APP_CONFIG = {
-  SUPABASE_URL: "",
-  SUPABASE_KEY: "",
+  SUPABASE_URL: "", https://dvgnqnfriocrtvwwspft.supabase.co
+  SUPABASE_KEY: "", eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2Z25xbmZyaW9jcnR2d3dzcGZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NTczMDcsImV4cCI6MjEwNDUzMzMwN30.1CsOVGmJTYpagwBXHl3tl9gzcCU07wGngxCAN95uHzQ
 };
