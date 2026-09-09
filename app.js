@@ -26,7 +26,16 @@
   let authError = ""; // 계정 저장/불러오기 실패 안내
 
   let modal = { open: false, symbol: null, tab: "buy", qty: 1, error: "" };
-  let addModal = { open: false, market: "KR", code: "", name: "", busy: false, error: "" };
+  let addModal = {
+    open: false, query: "", results: [], searching: false, searched: false,
+    manual: false, market: "KR", code: "", name: "", busy: false, error: "",
+  };
+  // 주문창 차트
+  let chart = { symbol: null, range: "1d", points: [], loading: false, error: false };
+  // 수익률 랭킹
+  let ranking = { rows: [], loading: false, error: "", myRow: null, loaded: false };
+  let nickModal = { open: false, busy: false, error: "" };
+  let rankSaveTimer = null;
   let manageMode = false;
   let watchExpanded = false; // 관심종목 전체 보기 여부
   const COLLAPSED_COUNT = 5; // 기본으로 보여줄 종목 수
@@ -187,6 +196,7 @@
     const priceMap = {};
     quotes.forEach((q) => (priceMap[q.symbol] = { price: q.price, priceKrw: q.priceKrw }));
     portfolio = Store.computePortfolio(priceMap);
+    scheduleRankSync();
   }
 
   async function refreshAll() {
@@ -208,8 +218,8 @@
   }
 
   async function pollTick() {
-    // 다른 탭을 보고 있거나 종목 입력 중이면 이번 차례는 건너뜁니다
-    if (document.visibilityState === "hidden" || addModal.open) return scheduleNextPoll();
+    // 다른 탭을 보고 있거나 뭔가 입력 중이면 이번 차례는 건너뜁니다
+    if (document.visibilityState === "hidden" || addModal.open || nickModal.open) return scheduleNextPoll();
     await refreshQuotes();
     recomputePortfolio();
     render();
@@ -252,6 +262,92 @@
         (syncLabel ? '<span class="sync-tag ' + sync + '">' + syncLabel + "</span>" : "") +
       "</div>" +
       '<button class="btn btn-sm" id="logoutBtn">로그아웃</button>';
+  }
+
+  // ── 기간별 차트 ───────────────────────────────────────────
+  const CHART_RANGES = [
+    { id: "1d", label: "1일" },
+    { id: "1w", label: "1주" },
+    { id: "1m", label: "1개월" },
+    { id: "1y", label: "1년" },
+  ];
+
+  async function loadChart(yahooSymbol, range) {
+    chart.loading = true;
+    chart.error = false;
+    paintChart();
+    try {
+      const data = await fetchJSON(
+        "/api/chart?symbol=" + encodeURIComponent(yahooSymbol) + "&range=" + encodeURIComponent(range)
+      );
+      chart.points = Array.isArray(data.points) ? data.points : [];
+      chart.error = chart.points.length < 2;
+    } catch {
+      chart.points = [];
+      chart.error = true;
+    }
+    chart.loading = false;
+    paintChart();
+  }
+
+  // 차트 부분만 다시 그립니다 (주문창 전체를 새로 그리면 입력이 초기화되므로)
+  function paintChart() {
+    const box = document.getElementById("chartBox");
+    if (box) box.innerHTML = chartInner();
+    const chips = document.getElementById("chartChips");
+    if (chips) {
+      chips.querySelectorAll("[data-range]").forEach((b) => {
+        b.classList.toggle("active", b.getAttribute("data-range") === chart.range);
+      });
+    }
+  }
+
+  function chartSvg(points, currency) {
+    const w = 100, h = 100, pad = 2; // viewBox 기준 (실제 크기는 CSS가 정합니다)
+    const vals = points.map((p) => p.c);
+    const min = Math.min.apply(null, vals);
+    const max = Math.max.apply(null, vals);
+    const span = max - min || 1;
+    const stepX = (w - pad * 2) / (points.length - 1);
+    const y = (v) => pad + (1 - (v - min) / span) * (h - pad * 2);
+    const pts = points.map((p, i) => (pad + i * stepX).toFixed(2) + "," + y(p.c).toFixed(2));
+    const rising = vals[vals.length - 1] >= vals[0];
+    const color = rising ? "var(--up)" : "var(--down)";
+    const line = pts.join(" ");
+    const area = pad + "," + (h - pad) + " " + line + " " + (w - pad).toFixed(2) + "," + (h - pad);
+
+    return '<svg class="chart-svg" viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+      '<polyline points="' + area + '" style="fill:' + color + ';opacity:.13" stroke="none"/>' +
+      '<polyline points="' + line + '" fill="none" style="stroke:' + color + '" stroke-width="0.9" ' +
+        'vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      '<div class="chart-axis"><span>' + money(max, currency) + "</span><span>" + money(min, currency) + "</span></div>";
+  }
+
+  function chartInner() {
+    if (chart.loading) return '<div class="chart-msg">차트 불러오는 중…</div>';
+    if (chart.error || chart.points.length < 2) return '<div class="chart-msg">이 기간의 차트를 가져오지 못했어요.</div>';
+
+    const s = quotes.find((q) => q.symbol === modal.symbol);
+    const currency = s ? s.currency : "KRW";
+    const first = chart.points[0].c;
+    const last = chart.points[chart.points.length - 1].c;
+    const diffPct = first ? ((last - first) / first) * 100 : 0;
+    const cls = diffPct > 0 ? "up" : diffPct < 0 ? "down" : "flat";
+    const label = (CHART_RANGES.find((r) => r.id === chart.range) || {}).label || "";
+
+    return '<div class="chart-top"><span class="chart-range-label">' + label + " 변동</span>" +
+      '<span class="chart-diff num ' + cls + '">' + pct(diffPct) + "</span></div>" +
+      '<div class="chart-plot">' + chartSvg(chart.points, currency) + "</div>";
+  }
+
+  function renderChartSection() {
+    return '<div class="chart-wrap">' +
+      '<div class="chart-chips" id="chartChips">' +
+        CHART_RANGES.map((r) =>
+          '<button class="chip' + (r.id === chart.range ? " active" : "") + '" data-range="' + r.id + '">' + r.label + "</button>"
+        ).join("") +
+      "</div>" +
+      '<div class="chart-box" id="chartBox">' + chartInner() + "</div></div>";
   }
 
   function renderHeader() {
@@ -394,6 +490,115 @@
     return '<section class="panel panel-txn"><div class="panel-head"><h2>거래 내역</h2></div>' + list + "</section>";
   }
 
+  // ── 수익률 랭킹 ───────────────────────────────────────────
+  async function loadRankingRows() {
+    if (!Auth.configured) return;
+    ranking.loading = !ranking.loaded;
+    try {
+      ranking.rows = await Auth.loadRanking(30);
+      ranking.error = "";
+    } catch (err) {
+      console.warn("랭킹 불러오기 실패:", err);
+      ranking.error = "랭킹을 불러오지 못했어요.";
+    }
+    ranking.loading = false;
+    ranking.loaded = true;
+  }
+
+  async function loadMyRank() {
+    if (!Auth.configured || !Auth.getUser()) {
+      ranking.myRow = null;
+      return;
+    }
+    try {
+      ranking.myRow = await Auth.loadMyRankRow();
+    } catch (err) {
+      console.warn("내 순위 확인 실패:", err);
+      ranking.myRow = null;
+    }
+  }
+
+  // 자산이 바뀌면 잠시 뒤 내 순위를 갱신합니다 (매매할 때마다 바로 쓰지 않도록)
+  function scheduleRankSync() {
+    if (!Auth.configured || !Auth.getUser() || !ranking.myRow) return;
+    clearTimeout(rankSaveTimer);
+    rankSaveTimer = setTimeout(async () => {
+      try {
+        await Auth.saveRanking(ranking.myRow.nickname, portfolio.totalAssets, portfolio.totalPnlPct);
+        ranking.myRow.total_assets = portfolio.totalAssets;
+        ranking.myRow.return_pct = portfolio.totalPnlPct;
+        await loadRankingRows();
+        if (!modal.open && !addModal.open && !nickModal.open) render();
+      } catch (err) {
+        console.warn("랭킹 저장 실패:", err);
+      }
+    }, 4000);
+  }
+
+  function renderRanking() {
+    if (!Auth.configured) return "";
+    const user = Auth.getUser();
+    const rows = ranking.rows || [];
+
+    let body;
+    if (ranking.loading) {
+      body = '<div class="empty-state">랭킹 불러오는 중…</div>';
+    } else if (ranking.error) {
+      body = '<div class="empty-state">' + escapeHtml(ranking.error) + "</div>";
+    } else if (!rows.length) {
+      body = '<div class="empty-state">아직 참가자가 없어요.<br>첫 번째로 이름을 올려보세요.</div>';
+    } else {
+      body = '<div class="rank-list">' + rows.map((r, i) => {
+        const isMe = user && r.user_id === user.id;
+        const p = Number(r.return_pct) || 0;
+        const cls = p > 0 ? "up" : p < 0 ? "down" : "flat";
+        const medal = i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : "";
+        return '<div class="rank-row' + (isMe ? " is-me" : "") + '">' +
+          '<span class="rank-no num ' + medal + '">' + (i + 1) + "</span>" +
+          '<span class="rank-mid"><span class="rank-name">' + escapeHtml(r.nickname) +
+            (isMe ? '<span class="me-tag">나</span>' : "") + "</span>" +
+            '<span class="rank-asset num">' + won(Number(r.total_assets) || 0) + "</span></span>" +
+          '<span class="rank-pct num ' + cls + '">' + pct(p) + "</span></div>";
+      }).join("") + "</div>";
+    }
+
+    let foot;
+    if (!user) {
+      foot = '<div class="rank-foot"><span class="rank-hint">로그인하면 내 수익률도 순위에 올릴 수 있어요</span></div>';
+    } else if (!ranking.myRow) {
+      foot = '<div class="rank-foot"><button class="btn more-btn" id="joinRankBtn">랭킹 참가하기</button></div>';
+    } else {
+      const myIndex = rows.findIndex((r) => r.user_id === user.id);
+      const place = myIndex >= 0 ? myIndex + 1 + "위" : "30위 밖";
+      foot = '<div class="rank-foot">' +
+        '<span class="rank-hint">내 순위 <strong>' + place + "</strong> · " + escapeHtml(ranking.myRow.nickname) + "</span>" +
+        '<span class="rank-actions"><button class="link-btn" id="editNickBtn">닉네임 변경</button>' +
+        '<button class="link-btn danger" id="leaveRankBtn">참가 취소</button></span></div>';
+    }
+
+    return '<section class="panel panel-rank">' +
+      '<div class="panel-head"><h2>수익률 랭킹</h2><span class="hint">상위 30명</span></div>' +
+      '<div class="panel-body">' + body + "</div>" + foot + "</section>";
+  }
+
+  function renderNickModal() {
+    if (!nickModal.open) return "";
+    const current = ranking.myRow ? ranking.myRow.nickname : "";
+    return '<div class="overlay" id="nickOverlay">' +
+      '<div class="modal" role="dialog" aria-modal="true" aria-label="닉네임 설정">' +
+        '<div class="modal-head"><div class="m-title"><div class="m-name">랭킹 참가</div>' +
+          '<div class="m-meta">순위표에 표시될 이름을 정해주세요</div></div>' +
+          '<button class="modal-close" id="nickClose" aria-label="닫기">✕</button></div>' +
+        '<div class="modal-body">' +
+          '<label class="field"><span class="field-label">닉네임 <span class="field-hint">2~12자</span></span>' +
+            '<input class="text-input" id="nickInput" type="text" maxlength="12" placeholder="예) 주식왕건우" value="' + escapeHtml(current) + '"' + (nickModal.busy ? " disabled" : "") + "></label>" +
+          '<div class="rank-note">닉네임과 수익률, 총자산이 다른 사람에게도 보입니다. 실명이나 개인정보는 쓰지 마세요.</div>' +
+          '<div class="err-msg">' + (nickModal.error ? escapeHtml(nickModal.error) : "") + "</div>" +
+          '<button class="exec-btn accent" id="nickSubmit"' + (nickModal.busy ? " disabled" : "") + ">" +
+            (nickModal.busy ? "저장 중…" : "참가하기") + "</button>" +
+        "</div></div></div>";
+  }
+
   function renderModal() {
     if (!modal.open) return "";
     const s = quotes.find((q) => q.symbol === modal.symbol);
@@ -421,6 +626,7 @@
           (fresh.text ? ' <span class="quote-time' + (fresh.live ? " live" : "") + (fresh.stale ? " stale" : "") + '">' + escapeHtml(fresh.text) + "</span>" : "") +
         "</div></div>" +
         '<button class="modal-close" id="modalClose" aria-label="닫기">✕</button></div>' +
+        renderChartSection() +
         '<div class="tabbar">' +
           '<button class="tab ' + (isBuy ? "active buy" : "") + '" data-tab="buy">매수</button>' +
           '<button class="tab ' + (!isBuy ? "active sell" : "") + '" data-tab="sell">매도</button>' +
@@ -437,10 +643,42 @@
           "</div>" +
           '<div class="amount-box"><span class="a-label">주문 금액</span>' +
             '<span class="a-value num">' + (amountKrw != null ? won(amountKrw) : "—") + amountSub + "</span></div>" +
-          '<div class="err-msg">' + (modal.error ? escapeHtml(modal.error) : "") + "</div>" +
-          '<button class="exec-btn ' + (isBuy ? "buy" : "sell") + '" id="execBtn" ' + (canExec ? "" : "disabled") + ">" +
-            (isBuy ? "매수 주문 실행" : "매도 주문 실행") + "</button>" +
+          '<div class="exec-dock">' +
+            '<div class="err-msg">' + (modal.error ? escapeHtml(modal.error) : "") + "</div>" +
+            '<button class="exec-btn ' + (isBuy ? "buy" : "sell") + '" id="execBtn" ' + (canExec ? "" : "disabled") + ">" +
+              (isBuy ? "매수 주문 실행" : "매도 주문 실행") + "</button>" +
+          "</div>" +
         "</div></div></div>";
+  }
+
+  // 검색 결과 목록만 따로 그립니다 (입력 중에 전체를 다시 그리면 커서가 튀므로)
+  function searchListInner() {
+    if (addModal.searching) return '<div class="search-msg">찾는 중…</div>';
+    if (!addModal.searched) {
+      return '<div class="search-msg">종목 이름 일부만 입력해도 찾아줍니다. 예) 삼성, 카카오, apple, 텐센트</div>';
+    }
+    if (!addModal.results.length) {
+      return '<div class="search-msg">검색 결과가 없어요. 아래에서 코드로 직접 추가해 보세요.</div>';
+    }
+    return addModal.results.map((r, i) => {
+      const owned = Store.findBySymbol(r.symbol);
+      return '<button class="sr-row" data-index="' + i + '"' + (owned ? " disabled" : "") + ">" +
+        '<span class="sr-main"><span class="sr-name">' + escapeHtml(r.name) + "</span>" +
+          '<span class="sr-meta num"><span class="mkt-badge mkt-' + r.market + '">' + (MARKET_LABEL[r.market] || r.market) + "</span>" +
+          escapeHtml(r.code) + "</span></span>" +
+        '<span class="sr-add">' + (owned ? "추가됨" : "추가") + "</span></button>";
+    }).join("");
+  }
+
+  function paintSearch() {
+    const box = document.getElementById("searchResults");
+    if (!box) return;
+    box.innerHTML = searchListInner();
+    box.querySelectorAll(".sr-row").forEach((row) => {
+      row.addEventListener("click", () => addFromSearch(parseInt(row.getAttribute("data-index"), 10)));
+    });
+    const err = document.getElementById("addError");
+    if (err) err.textContent = addModal.error || "";
   }
 
   function renderAddModal() {
@@ -448,20 +686,28 @@
     const market = markets.find((m) => m.id === addModal.market) || markets[0] || { placeholder: "005930", hint: "" };
     const options = markets.map((m) => '<option value="' + m.id + '"' + (m.id === addModal.market ? " selected" : "") + ">" + escapeHtml(m.label) + "</option>").join("");
 
-    return '<div class="overlay" id="addOverlay">' +
-      '<div class="modal" role="dialog" aria-modal="true" aria-label="종목 추가">' +
-        '<div class="modal-head"><div class="m-title"><div class="m-name">종목 추가</div>' +
-          '<div class="m-meta">시장을 고르고 종목코드를 입력하세요</div></div>' +
-          '<button class="modal-close" id="addClose" aria-label="닫기">✕</button></div>' +
-        '<div class="modal-body">' +
+    const manualBlock = addModal.manual
+      ? '<div class="manual-box">' +
           '<label class="field"><span class="field-label">시장</span>' +
             '<select class="text-input" id="addMarket"' + (addModal.busy ? " disabled" : "") + ">" + options + "</select></label>" +
           '<label class="field"><span class="field-label">종목코드 <span class="field-hint">' + escapeHtml(market.hint || "") + "</span></span>" +
             '<input class="text-input num" id="addCode" type="text" maxlength="10" placeholder="' + escapeHtml(market.placeholder || "") + '" value="' + escapeHtml(addModal.code) + '"' + (addModal.busy ? " disabled" : "") + "></label>" +
-          '<label class="field"><span class="field-label">표시 이름 <span class="field-hint">비워두면 자동</span></span>' +
-            '<input class="text-input" id="addName" type="text" maxlength="20" placeholder="자동으로 채워집니다" value="' + escapeHtml(addModal.name) + '"' + (addModal.busy ? " disabled" : "") + "></label>" +
-          '<div class="err-msg">' + (addModal.error ? escapeHtml(addModal.error) : "") + "</div>" +
-          '<button class="exec-btn accent" id="addSubmit"' + (addModal.busy ? " disabled" : "") + ">" + (addModal.busy ? "확인 중…" : "추가하기") + "</button>" +
+          '<button class="exec-btn accent" id="addSubmit"' + (addModal.busy ? " disabled" : "") + ">" + (addModal.busy ? "확인 중…" : "코드로 추가하기") + "</button>" +
+        "</div>"
+      : "";
+
+    return '<div class="overlay" id="addOverlay">' +
+      '<div class="modal" role="dialog" aria-modal="true" aria-label="종목 추가">' +
+        '<div class="modal-head"><div class="m-title"><div class="m-name">종목 추가</div>' +
+          '<div class="m-meta">이름이나 코드로 검색하세요</div></div>' +
+          '<button class="modal-close" id="addClose" aria-label="닫기">✕</button></div>' +
+        '<div class="modal-body">' +
+          '<input class="text-input search-input" id="searchInput" type="search" autocomplete="off" ' +
+            'placeholder="삼성전자, 카카오, AAPL, 005930 …" value="' + escapeHtml(addModal.query) + '">' +
+          '<div class="search-results" id="searchResults">' + searchListInner() + "</div>" +
+          '<div class="err-msg" id="addError">' + (addModal.error ? escapeHtml(addModal.error) : "") + "</div>" +
+          '<button class="link-btn" id="manualToggle">' + (addModal.manual ? "검색으로 추가하기" : "코드로 직접 추가하기") + "</button>" +
+          manualBlock +
         "</div></div></div>";
   }
 
@@ -469,21 +715,25 @@
     app.innerHTML =
       renderHeader() +
       renderSummary() +
-      '<main class="layout">' + renderWatchlist() + '<div class="side-stack">' + renderPortfolio() + renderTransactions() + "</div></main>" +
+      '<main class="layout">' + renderWatchlist() +
+        '<div class="side-stack">' + renderPortfolio() + renderRanking() + renderTransactions() + "</div></main>" +
       '<footer class="note">가상의 예수금 ₩10,000,000으로 시작하는 연습용 모의투자입니다 · 실제 매매·투자 판단의 근거로 사용하지 마세요<br>' +
         (Store.getMode() === "cloud"
           ? "잔고와 거래내역은 내 계정에 저장되며, 다른 사람에게는 보이지 않습니다"
           : "잔고와 거래내역은 이 브라우저에만 저장되며, 다른 사람에게는 보이지 않습니다") +
         '<div class="doc-links"><a href="/terms.html">이용약관</a> · <a href="/privacy.html">개인정보처리방침</a></div>' +
       "</footer>" +
-      renderModal() + renderAddModal();
+      renderModal() + renderAddModal() + renderNickModal();
     bindEvents();
   }
 
   // ── 이벤트 ────────────────────────────────────────────────
   function openModal(symbol, tab) {
     modal = { open: true, symbol, tab: tab || "buy", qty: 1, error: "" };
+    const s = quotes.find((q) => q.symbol === symbol);
+    chart = { symbol, range: chart.range || "1d", points: [], loading: Boolean(s), error: !s };
     render();
+    if (s) loadChart(s.yahooSymbol, chart.range);
   }
   function closeModal() {
     modal.open = false;
@@ -529,9 +779,12 @@
 
     const addStockBtn = document.getElementById("addStockBtn");
     if (addStockBtn) addStockBtn.addEventListener("click", () => {
-      addModal = { open: true, market: addModal.market || "KR", code: "", name: "", busy: false, error: "" };
+      addModal = {
+        open: true, query: "", results: [], searching: false, searched: false,
+        manual: false, market: addModal.market || "KR", code: "", name: "", busy: false, error: "",
+      };
       render();
-      const el = document.getElementById("addCode");
+      const el = document.getElementById("searchInput");
       if (el) el.focus();
     });
 
@@ -573,8 +826,76 @@
       });
     });
 
+    bindRankingEvents();
     bindTradeModalEvents();
     bindAddModalEvents();
+    bindNickModalEvents();
+  }
+
+  function bindRankingEvents() {
+    const joinBtn = document.getElementById("joinRankBtn");
+    if (joinBtn) joinBtn.addEventListener("click", () => {
+      nickModal = { open: true, busy: false, error: "" };
+      render();
+      const el = document.getElementById("nickInput");
+      if (el) el.focus();
+    });
+
+    const editBtn = document.getElementById("editNickBtn");
+    if (editBtn) editBtn.addEventListener("click", () => {
+      nickModal = { open: true, busy: false, error: "" };
+      render();
+    });
+
+    const leaveBtn = document.getElementById("leaveRankBtn");
+    if (leaveBtn) leaveBtn.addEventListener("click", async () => {
+      if (!window.confirm("랭킹에서 내 기록을 뺄까요? 언제든 다시 참가할 수 있어요.")) return;
+      try {
+        await Auth.leaveRanking();
+        ranking.myRow = null;
+        await loadRankingRows();
+        render();
+      } catch (err) {
+        console.warn(err);
+        window.alert("처리하지 못했어요. 잠시 후 다시 시도해 주세요.");
+      }
+    });
+  }
+
+  function bindNickModalEvents() {
+    const overlay = document.getElementById("nickOverlay");
+    if (!overlay) return;
+    const close = () => { nickModal.open = false; render(); };
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.getElementById("nickClose").addEventListener("click", close);
+
+    const input = document.getElementById("nickInput");
+    const submit = async () => {
+      if (nickModal.busy) return;
+      const nickname = (input.value || "").trim();
+      if (nickname.length < 2) {
+        nickModal.error = "닉네임은 2자 이상으로 정해주세요.";
+        return render();
+      }
+      nickModal.busy = true;
+      nickModal.error = "";
+      render();
+      try {
+        await Auth.saveRanking(nickname, portfolio.totalAssets, portfolio.totalPnlPct);
+        ranking.myRow = { nickname, total_assets: portfolio.totalAssets, return_pct: portfolio.totalPnlPct };
+        nickModal = { open: false, busy: false, error: "" };
+        await loadRankingRows();
+        render();
+      } catch (err) {
+        console.warn("랭킹 저장 실패:", err);
+        const dup = String(err && (err.code || err.message)).includes("23505");
+        nickModal.busy = false;
+        nickModal.error = dup ? "이미 누가 쓰는 닉네임이에요. 다른 이름으로 해주세요." : "저장하지 못했어요. 잠시 후 다시 시도해 주세요.";
+        render();
+      }
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    document.getElementById("nickSubmit").addEventListener("click", submit);
   }
 
   function bindTradeModalEvents() {
@@ -582,6 +903,18 @@
     if (!overlay) return;
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
     document.getElementById("modalClose").addEventListener("click", closeModal);
+
+    // 차트 기간 버튼 (차트 부분만 갱신)
+    document.querySelectorAll("#chartChips [data-range]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const range = btn.getAttribute("data-range");
+        if (range === chart.range) return;
+        chart.range = range;
+        const s = quotes.find((q) => q.symbol === modal.symbol);
+        paintChart();
+        if (s) loadChart(s.yahooSymbol, range);
+      });
+    });
 
     document.querySelectorAll(".tab").forEach((t) => {
       t.addEventListener("click", () => {
@@ -637,6 +970,57 @@
     }
   }
 
+  let searchTimer = null;
+
+  async function runSearch(query) {
+    addModal.searching = true;
+    addModal.error = "";
+    paintSearch();
+    try {
+      const data = await fetchJSON("/api/search?q=" + encodeURIComponent(query));
+      if (addModal.query.trim() !== query) return; // 그 사이 더 입력했으면 무시
+      addModal.results = data.results || [];
+    } catch {
+      addModal.results = [];
+      addModal.error = "검색 중 오류가 났어요. 잠시 후 다시 시도해 주세요.";
+    }
+    addModal.searching = false;
+    addModal.searched = true;
+    paintSearch();
+  }
+
+  function addFromSearch(index) {
+    const item = addModal.results[index];
+    if (!item) return;
+    try {
+      Store.addItem({
+        symbol: item.symbol,
+        code: item.code,
+        market: item.market,
+        currency: item.currency,
+        yahooSymbol: item.yahooSymbol,
+        name: item.name,
+        sector: item.sector,
+      });
+      addModal.open = false;
+      loadHistory().then(refreshAll);
+      render();
+    } catch (err) {
+      addModal.error = addErrorMessage(err.message);
+      paintSearch();
+    }
+  }
+
+  function addErrorMessage(code) {
+    return {
+      SYMBOL_NOT_FOUND: "그 코드로 종목을 찾지 못했어요. 시장과 코드를 확인해 주세요.",
+      ALREADY_EXISTS: "이미 목록에 있는 종목이에요.",
+      WATCHLIST_FULL: "종목은 최대 40개까지 담을 수 있어요.",
+      INVALID_CODE: "종목코드 형식이 맞지 않아요.",
+      LOOKUP_FAILED: "종목을 확인하는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.",
+    }[code] || "종목을 추가하지 못했어요.";
+  }
+
   function bindAddModalEvents() {
     const overlay = document.getElementById("addOverlay");
     if (!overlay) return;
@@ -644,8 +1028,38 @@
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
     document.getElementById("addClose").addEventListener("click", close);
 
+    const searchInput = document.getElementById("searchInput");
+    if (searchInput) {
+      searchInput.addEventListener("input", () => {
+        addModal.query = searchInput.value;
+        clearTimeout(searchTimer);
+        const q = addModal.query.trim();
+        if (q.length < 1) {
+          addModal.results = [];
+          addModal.searched = false;
+          addModal.searching = false;
+          return paintSearch();
+        }
+        searchTimer = setTimeout(() => runSearch(q), 350);
+      });
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        clearTimeout(searchTimer);
+        const q = addModal.query.trim();
+        if (q) runSearch(q);
+      });
+    }
+
+    const manualToggle = document.getElementById("manualToggle");
+    if (manualToggle) manualToggle.addEventListener("click", () => {
+      addModal.manual = !addModal.manual;
+      addModal.error = "";
+      render();
+    });
+
+    // 아래는 '코드로 직접 추가'를 폈을 때만 존재합니다
     const marketSelect = document.getElementById("addMarket");
-    marketSelect.addEventListener("change", () => {
+    if (marketSelect) marketSelect.addEventListener("change", () => {
       addModal.market = marketSelect.value;
       addModal.code = "";
       addModal.error = "";
@@ -653,17 +1067,17 @@
     });
 
     const codeInput = document.getElementById("addCode");
-    const nameInput = document.getElementById("addName");
-    codeInput.addEventListener("input", () => {
-      addModal.code = addModal.market === "US"
-        ? codeInput.value.toUpperCase().replace(/[^A-Z0-9.\-]/g, "")
-        : codeInput.value.replace(/\D/g, "");
-      codeInput.value = addModal.code;
-    });
-    nameInput.addEventListener("input", () => { addModal.name = nameInput.value; });
-    codeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitAddStock(); });
-    nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitAddStock(); });
-    document.getElementById("addSubmit").addEventListener("click", submitAddStock);
+    if (codeInput) {
+      codeInput.addEventListener("input", () => {
+        addModal.code = addModal.market === "US"
+          ? codeInput.value.toUpperCase().replace(/[^A-Z0-9.\-]/g, "")
+          : codeInput.value.replace(/\D/g, "");
+        codeInput.value = addModal.code;
+      });
+      codeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitAddStock(); });
+    }
+    const submit = document.getElementById("addSubmit");
+    if (submit) submit.addEventListener("click", submitAddStock);
   }
 
   async function submitAddStock() {
@@ -686,22 +1100,18 @@
         market: item.market,
         currency: item.currency,
         yahooSymbol: item.yahooSymbol,
-        name: (addModal.name || "").trim() || item.name,
+        name: item.name,
         sector: item.sector,
       });
-      addModal = { open: false, market: addModal.market, code: "", name: "", busy: false, error: "" };
+      addModal.open = false;
+      addModal.busy = false;
+      addModal.code = "";
+      render();
       await loadHistory();
       await refreshAll();
     } catch (err) {
-      const msgMap = {
-        SYMBOL_NOT_FOUND: "그 코드로 종목을 찾지 못했어요. 시장과 코드를 확인해 주세요.",
-        ALREADY_EXISTS: "이미 목록에 있는 종목이에요.",
-        WATCHLIST_FULL: "종목은 최대 40개까지 담을 수 있어요.",
-        INVALID_CODE: "종목코드 형식이 맞지 않아요.",
-        LOOKUP_FAILED: "종목을 확인하는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.",
-      };
       addModal.busy = false;
-      addModal.error = msgMap[err.message] || "종목을 추가하지 못했어요.";
+      addModal.error = addErrorMessage(err.message);
       render();
     }
   }
@@ -757,8 +1167,10 @@
 
     authBusy = false;
     historyLoaded.clear();
+    await loadMyRank();
     await loadHistory();
     await refreshAll();
+    loadRankingRows().then(() => render());
   }
 
   // 로그아웃할 때: 이 브라우저에 저장돼 있던 게스트 데이터로 돌아갑니다.
@@ -766,6 +1178,7 @@
     Store.useLocal();
     authNotice = "";
     authError = "";
+    ranking.myRow = null;
     historyLoaded.clear();
     await loadHistory();
     await refreshAll();
@@ -802,6 +1215,14 @@
       } catch (err) {
         console.warn("로그인 초기화 실패:", err);
       }
+
+      // 랭킹은 로그인 안 해도 볼 수 있습니다
+      await loadRankingRows();
+      render();
+      setInterval(() => {
+        if (document.visibilityState !== "visible" || modal.open || addModal.open || nickModal.open) return;
+        loadRankingRows().then(() => render());
+      }, 120000);
     }
 
     document.addEventListener("visibilitychange", () => {

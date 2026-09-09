@@ -100,9 +100,59 @@ window.Auth = (function () {
     if (error) throw error;
   }
 
+  // ── 수익률 랭킹 ────────────────────────────────────────────
+  // 랭킹은 로그인 안 한 사람도 볼 수 있습니다 (읽기는 누구나 허용).
+  async function loadRanking(limit) {
+    if (!client) return [];
+    const { data, error } = await client
+      .from("leaderboard")
+      .select("user_id,nickname,total_assets,return_pct,updated_at")
+      .order("return_pct", { ascending: false })
+      .limit(limit || 30);
+    if (error) throw error;
+    return data || [];
+  }
+
+  // 내 순위 한 줄 (참가 안 했으면 null)
+  async function loadMyRankRow() {
+    if (!client || !user) return null;
+    const { data, error } = await client
+      .from("leaderboard")
+      .select("nickname,total_assets,return_pct")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (error) throw error;
+    return data || null;
+  }
+
+  async function saveRanking(nickname, totalAssets, returnPct) {
+    if (!client || !user) throw new Error("NOT_SIGNED_IN");
+    const { error } = await client.from("leaderboard").upsert(
+      {
+        user_id: user.id,
+        nickname: String(nickname).slice(0, 12),
+        total_assets: Math.round(totalAssets),
+        return_pct: Number(returnPct.toFixed(2)),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
+    if (error) throw error;
+  }
+
+  async function leaveRanking() {
+    if (!client || !user) return;
+    const { error } = await client.from("leaderboard").delete().eq("user_id", user.id);
+    if (error) throw error;
+  }
+
   return {
     configured,
     init,
+    loadRanking,
+    loadMyRankRow,
+    saveRanking,
+    leaveRanking,
     signInWithGoogle,
     signOut,
     loadRemote,

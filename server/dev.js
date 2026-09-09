@@ -5,7 +5,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 
-import { marketsHandler, quotesHandler, lookupHandler, historyHandler } from "../lib/handlers.js";
+import {
+  marketsHandler,
+  quotesHandler,
+  lookupHandler,
+  historyHandler,
+  searchHandler,
+  chartHandler,
+} from "../lib/handlers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +42,25 @@ app.get("/api/history", async (req, res) => {
     res.json(await historyHandler(req.query));
   } catch (err) {
     res.status(502).json({ error: "HISTORY_FETCH_FAILED", message: err.message });
+  }
+});
+
+app.get("/api/search", async (req, res) => {
+  try {
+    res.json(await searchHandler(req.query));
+  } catch (err) {
+    console.error("[search]", err.message);
+    res.status(502).json({ error: "SEARCH_FAILED", message: err.message });
+  }
+});
+
+app.get("/api/chart", async (req, res) => {
+  try {
+    const data = await chartHandler(req.query);
+    if (data.error) return res.status(400).json(data);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "CHART_FETCH_FAILED", message: err.message });
   }
 });
 

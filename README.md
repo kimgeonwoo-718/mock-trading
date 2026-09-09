@@ -23,6 +23,14 @@
 - 폰트는 Google Fonts의 `M PLUS Rounded 1c`(숫자·영문) + `Jua`(제목) + `Gothic A1`(본문)
   조합입니다. 인터넷이 끊기면 기기 기본 폰트로 대체됩니다.
 
+## 주요 기능
+
+- **종목 검색**: 이름 일부만 입력해도 찾아줍니다 ("삼성" → 삼성전자). 코드로 직접 추가도 가능합니다.
+- **기간별 차트**: 주문창에서 1일 / 1주 / 1개월 / 1년 흐름을 볼 수 있습니다.
+- **수익률 랭킹**: 로그인 후 닉네임을 정하면 전체 참가자 순위에 오릅니다.
+  켜려면 [RANKING-SETUP.md](./RANKING-SETUP.md) 의 SQL을 실행해야 합니다.
+- **관심종목 접기**: 기본 5개만 보이고 나머지는 "전체 보기"로 펼칩니다.
+
 ## 지원 시장
 
 | 시장 | 통화 | 종목코드 | 예시 |
@@ -70,7 +78,9 @@ index.html, app.js, store.js, auth.js, config.js, styles.css   프론트엔드 (
 api/
   quotes.js   시세 + 환율
   history.js  스파크라인용 최근 흐름 (5분봉)
-  lookup.js   종목코드로 종목 찾기 (추가할 때)
+  chart.js    기간별 차트 (1일/1주/1개월/1년)
+  search.js   종목 이름으로 검색
+  lookup.js   종목코드로 종목 찾기 (직접 추가할 때)
   markets.js  지원 시장 목록
 lib/
   yahoo.js    Yahoo Finance 호출 + 짧은 캐시
