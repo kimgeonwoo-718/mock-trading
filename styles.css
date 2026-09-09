@@ -325,6 +325,23 @@ footer.note a{color:var(--text-secondary);}
   .pill-btn{padding:10px 16px;font-size:.95rem;}
   .txn-row{padding:14px 16px;}
 
+  /* 주문창은 아래에서 올라오는 시트 형태로 (화면이 짧아도 안 잘리게) */
+  .overlay{padding:0;align-items:flex-end;}
+  .modal{max-width:none;width:100%;border-radius:var(--radius-xl) var(--radius-xl) 0 0;
+    max-height:88vh;max-height:88dvh;overflow-y:auto;}
+  .modal-head{padding:18px 18px 15px;}
+  .modal-head .m-name{font-size:1.25rem;}
+  .modal-head .m-meta{font-size:.88rem;}
+  .tabbar{padding:12px 18px 0;gap:6px;}
+  .tab{padding:11px 0;font-size:1rem;}
+  .modal-body{padding:16px 18px calc(20px + env(safe-area-inset-bottom));gap:13px;}
+  .kv-row{font-size:.95rem;}
+  .qty-btn{width:44px;height:44px;font-size:1.2rem;}
+  .qty-input{font-size:1.15rem;padding:9px;}
+  .amount-box{padding:14px 16px;}
+  .amount-box .a-value{font-size:1.25rem;}
+  .exec-btn{padding:15px;font-size:1.05rem;}
+
   /* 관심종목은 표 대신 카드 형태로 (가로 스크롤 없이 한눈에) */
   .watch-table thead{display:none;}
   .watch-table,.watch-table tbody{display:block;width:100%;}
