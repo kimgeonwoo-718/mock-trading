@@ -125,12 +125,14 @@ button{font-family:inherit;cursor:pointer;}
 
 main.layout{display:grid;grid-template-columns:1.5fr 1fr;gap:22px;align-items:start;}
 /* 긴 종목명(해외 주식 정식명 등)이 칸을 밀어내지 않도록 */
-main.layout > *{min-width:0;}
+main.layout > *,.side-stack > *{min-width:0;}
 /* 좁은 화면에서는 한 줄로 쌓되, 보유 종목을 관심종목보다 위로 올립니다.
    (보유한 게 없을 때는 굳이 위로 올리지 않습니다) */
 @media (max-width:980px){
   main.layout{display:flex;flex-direction:column;gap:22px;}
   main.layout > .side-stack{display:contents;}
+  /* 긴 이름이 패널을 화면보다 넓게 늘리지 못하게 폭을 고정합니다 */
+  .panel-hold,.panel-watch,.panel-txn{width:100%;max-width:100%;}
   .panel-hold{order:1;}
   .panel-watch{order:2;}
   .panel-hold.is-empty{order:2;}
@@ -221,8 +223,8 @@ tbody tr.watch-row:hover,tbody tr.hold-row:hover{background:var(--surface-alt);}
 .side-stack{display:flex;flex-direction:column;gap:22px;min-width:0;}
 
 /* ── 거래 내역 ────────────────────────────────────── */
-.txn-list{max-height:420px;overflow-y:auto;}
-.txn-row{display:flex;align-items:center;gap:13px;padding:16px 22px;border-bottom:1.5px solid var(--border);}
+.txn-list{max-height:420px;overflow-y:auto;min-width:0;}
+.txn-row{display:flex;align-items:center;gap:13px;padding:16px 22px;border-bottom:1.5px solid var(--border);min-width:0;}
 .txn-row:last-child{border-bottom:none;}
 .txn-badge{flex:0 0 auto;font-size:.86rem;font-weight:800;padding:5px 12px;border-radius:99px;white-space:nowrap;}
 .txn-badge.buy{background:var(--up-soft);color:var(--up);}
@@ -230,7 +232,7 @@ tbody tr.watch-row:hover,tbody tr.hold-row:hover{background:var(--surface-alt);}
 .txn-mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
 .txn-mid .t-name{font-weight:700;font-size:1.02rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .txn-mid .t-time{font-size:.84rem;color:var(--text-muted);}
-.txn-end{flex:0 0 auto;text-align:right;display:flex;flex-direction:column;gap:2px;}
+.txn-end{flex:0 0 auto;text-align:right;display:flex;flex-direction:column;gap:2px;white-space:nowrap;}
 .txn-end .t-amount{font-weight:800;font-size:1.05rem;}
 .txn-end .t-qty{font-size:.84rem;color:var(--text-muted);}
 
@@ -316,10 +318,10 @@ footer.note a{color:var(--text-secondary);}
   .brand h1{font-size:1.75rem;}
   .top-actions{width:100%;justify-content:space-between;}
 
-  /* 요약 지표는 2칸으로 */
-  .summary-row{grid-template-columns:1fr 1fr;}
-  .stat{padding:18px 18px;}
-  .stat .value{font-size:1.62rem;}
+  /* 요약 지표는 2칸으로 (칸이 서로 밀지 않도록 minmax(0,..)) */
+  .summary-row{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .stat{padding:18px 16px;}
+  .stat .value{font-size:1.45rem;}
   .stat .sub{font-size:.8rem;}
 
   .panel-head{padding:18px 18px;}
