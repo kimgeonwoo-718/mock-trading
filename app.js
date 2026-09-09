@@ -400,7 +400,7 @@
 
     return '<div class="overlay" id="overlay">' +
       '<div class="modal" role="dialog" aria-modal="true" aria-label="' + escapeHtml(s.name) + ' 주문">' +
-        '<div class="modal-head"><div><div class="m-name">' + escapeHtml(s.name) + "</div>" +
+        '<div class="modal-head"><div class="m-title"><div class="m-name">' + escapeHtml(s.name) + "</div>" +
           '<div class="m-meta num"><span class="mkt-badge mkt-' + s.market + '">' + (MARKET_LABEL[s.market] || s.market) + "</span>" +
           escapeHtml(s.code) + " · " + priceLine +
           (fresh.text ? ' <span class="quote-time' + (fresh.live ? " live" : "") + (fresh.stale ? " stale" : "") + '">' + escapeHtml(fresh.text) + "</span>" : "") +
@@ -435,7 +435,7 @@
 
     return '<div class="overlay" id="addOverlay">' +
       '<div class="modal" role="dialog" aria-modal="true" aria-label="종목 추가">' +
-        '<div class="modal-head"><div><div class="m-name">종목 추가</div>' +
+        '<div class="modal-head"><div class="m-title"><div class="m-name">종목 추가</div>' +
           '<div class="m-meta">시장을 고르고 종목코드를 입력하세요</div></div>' +
           '<button class="modal-close" id="addClose" aria-label="닫기">✕</button></div>' +
         '<div class="modal-body">' +
