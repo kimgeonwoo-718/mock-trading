@@ -126,7 +126,16 @@ button{font-family:inherit;cursor:pointer;}
 main.layout{display:grid;grid-template-columns:1.5fr 1fr;gap:22px;align-items:start;}
 /* 긴 종목명(해외 주식 정식명 등)이 칸을 밀어내지 않도록 */
 main.layout > *{min-width:0;}
-@media (max-width:980px){main.layout{grid-template-columns:1fr;}}
+/* 좁은 화면에서는 한 줄로 쌓되, 보유 종목을 관심종목보다 위로 올립니다.
+   (보유한 게 없을 때는 굳이 위로 올리지 않습니다) */
+@media (max-width:980px){
+  main.layout{display:flex;flex-direction:column;gap:22px;}
+  main.layout > .side-stack{display:contents;}
+  .panel-hold{order:1;}
+  .panel-watch{order:2;}
+  .panel-hold.is-empty{order:2;}
+  .panel-txn{order:3;}
+}
 
 /* ── 패널 ─────────────────────────────────────────── */
 section.panel{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-xl);
@@ -175,8 +184,8 @@ thead th{text-align:left;padding:13px 22px;font-size:.84rem;color:var(--text-mut
   letter-spacing:.01em;font-weight:700;border-bottom:1.5px solid var(--border);white-space:nowrap;}
 tbody td{padding:18px 22px;border-bottom:1.5px solid var(--border);vertical-align:middle;}
 tbody tr:last-child td{border-bottom:none;}
-tbody tr.watch-row{cursor:pointer;transition:background .15s ease;}
-tbody tr.watch-row:hover{background:var(--surface-alt);}
+tbody tr.watch-row,tbody tr.hold-row{cursor:pointer;transition:background .15s ease;}
+tbody tr.watch-row:hover,tbody tr.hold-row:hover{background:var(--surface-alt);}
 .th-num,.td-num{text-align:right;}
 
 .stock-name{display:flex;flex-direction:column;gap:5px;min-width:0;}

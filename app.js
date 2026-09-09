@@ -325,7 +325,7 @@
         '<td class="td-num"><div class="row-actions">' + actions + "</div></td></tr>";
     }).join("");
 
-    return '<section class="panel">' +
+    return '<section class="panel panel-watch">' +
       '<div class="panel-head"><h2>관심종목 <span class="count num">' + quotes.length + "</span></h2>" +
         '<div class="head-actions">' +
           '<span class="hint">' + (anyMarketOpen() ? POLL_OPEN_MS / 1000 + "초마다 갱신" : "장 마감 · " + POLL_CLOSED_MS / 1000 + "초마다 확인") + "</span>" +
@@ -346,7 +346,7 @@
       const rows = list.map((h) => {
         const plClass = h.pnl > 0 ? "up" : h.pnl < 0 ? "down" : "flat";
         const avgLabel = h.currency === "KRW" ? "평단 " + won(h.avgPrice) : "평단 " + money(h.avgPriceNative, h.currency);
-        return "<tr>" +
+        return '<tr class="hold-row" data-symbol="' + escapeHtml(h.symbol) + '">' +
           '<td><div class="stock-name"><span class="name">' + escapeHtml(h.name) + "</span>" +
             '<span class="meta num">' + h.qty.toLocaleString("ko-KR") + "주 · " + avgLabel + "</span></div></td>" +
           '<td class="td-num"><div class="price-cell"><span class="price num">' + won(h.value) + "</span>" +
@@ -354,8 +354,9 @@
       }).join("");
       body = '<table><thead><tr><th>보유종목</th><th class="th-num">평가금액 / 손익</th></tr></thead><tbody>' + rows + "</tbody></table>";
     }
-    return '<section class="panel"><div class="panel-head"><h2>보유 종목</h2>' +
-      '<span class="hint">해외 종목은 원화 환산 기준</span></div>' +
+    return '<section class="panel panel-hold' + (list.length ? "" : " is-empty") + '">' +
+      '<div class="panel-head"><h2>보유 종목</h2>' +
+      '<span class="hint">' + (list.length ? "탭하면 매도·추가매수" : "해외 종목은 원화 환산 기준") + "</span></div>" +
       '<div class="panel-body">' + body + "</div></section>";
   }
 
@@ -375,7 +376,7 @@
             '<span class="t-qty num">' + tx.qty.toLocaleString("ko-KR") + "주 · " + unit + "</span></div></div>";
       }).join("") + "</div>";
     }
-    return '<section class="panel"><div class="panel-head"><h2>거래 내역</h2></div>' + list + "</section>";
+    return '<section class="panel panel-txn"><div class="panel-head"><h2>거래 내역</h2></div>' + list + "</section>";
   }
 
   function renderModal() {
@@ -531,6 +532,11 @@
         openModal(row.getAttribute("data-symbol"), "buy");
       });
     });
+    // 보유 종목을 탭하면 바로 주문창 (매도 탭으로 열림)
+    document.querySelectorAll(".hold-row").forEach((row) => {
+      row.addEventListener("click", () => openModal(row.getAttribute("data-symbol"), "sell"));
+    });
+
     document.querySelectorAll(".pill-btn").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
