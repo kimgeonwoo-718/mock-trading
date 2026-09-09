@@ -24,6 +24,37 @@
   let addModal = { open: false, market: "KR", code: "", name: "", busy: false, error: "" };
   let manageMode = false;
 
+  // ── 화면 모드 (자동 / 밝게 / 어둡게) ───────────────────────
+  const THEME_KEY = "mockTrading.theme.v1";
+  const THEME_OPTIONS = [
+    { id: "system", label: "자동" },
+    { id: "light", label: "밝게" },
+    { id: "dark", label: "어둡게" },
+  ];
+
+  function readTheme() {
+    try {
+      const v = localStorage.getItem(THEME_KEY);
+      return v === "dark" || v === "light" ? v : "system";
+    } catch {
+      return "system";
+    }
+  }
+  let themeMode = readTheme();
+
+  function applyTheme(mode) {
+    themeMode = mode;
+    if (mode === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", mode);
+    try {
+      if (mode === "system") localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, mode);
+    } catch {
+      /* 저장 못 해도 이번 방문 동안에는 적용됩니다 */
+    }
+  }
+  applyTheme(themeMode);
+
   // ── 표시 유틸 ──────────────────────────────────────────────
   function won(n) {
     const v = Math.round(n);
@@ -159,7 +190,7 @@
 
   // ── 렌더 ──────────────────────────────────────────────────
   function sparkline(hist) {
-    const w = 88, h = 30, pad = 3;
+    const w = 132, h = 46, pad = 4;
     if (!hist || hist.length < 2) return '<svg viewBox="0 0 ' + w + " " + h + '" width="' + w + '" height="' + h + '" aria-hidden="true"></svg>';
     const min = Math.min.apply(null, hist), max = Math.max.apply(null, hist);
     const span = max - min || 1;
@@ -170,8 +201,8 @@
     const line = pts.join(" ");
     const area = pad + "," + (h - pad) + " " + line + " " + (w - pad) + "," + (h - pad);
     return '<svg viewBox="0 0 ' + w + " " + h + '" width="' + w + '" height="' + h + '" aria-hidden="true">' +
-      '<polyline points="' + area + '" style="fill:' + colorVar + ';opacity:.14" stroke="none"/>' +
-      '<polyline points="' + line + '" fill="none" style="stroke:' + colorVar + '" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      '<polyline points="' + area + '" style="fill:' + colorVar + ';opacity:.15" stroke="none"/>' +
+      '<polyline points="' + line + '" fill="none" style="stroke:' + colorVar + '" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   }
 
   function renderHeader() {
@@ -187,7 +218,15 @@
           '<span class="badge-mode live">실제 시세 · 지연 15~20분</span>' +
           "가상의 1,000만 원으로 국내·해외 주식을 연습하는 모의투자입니다 (실제 주문은 전송되지 않습니다)" +
         "</p></div>" +
-        '<div class="top-actions"><button class="btn" id="resetBtn">초기화</button></div>' +
+        '<div class="top-actions">' +
+          '<div class="theme-switch" role="group" aria-label="화면 모드">' +
+            THEME_OPTIONS.map((o) =>
+              '<button class="theme-opt' + (themeMode === o.id ? " active" : "") + '" data-theme-set="' + o.id + '"' +
+              (themeMode === o.id ? ' aria-pressed="true"' : ' aria-pressed="false"') + ">" + o.label + "</button>"
+            ).join("") +
+          "</div>" +
+          '<button class="btn" id="resetBtn">초기화</button>' +
+        "</div>" +
       "</header>" + warn;
   }
 
@@ -235,7 +274,7 @@
           '<button class="btn btn-sm" id="addStockBtn">+ 종목 추가</button>' +
           '<button class="btn btn-sm' + (manageMode ? " active" : "") + '" id="manageBtn">' + (manageMode ? "완료" : "편집") + "</button>" +
         "</div></div>" +
-      '<div class="panel-body"><table><thead><tr><th>종목</th><th>추이</th>' +
+      '<div class="panel-body"><table class="watch-table"><thead><tr><th>종목</th><th>추이</th>' +
         '<th class="th-num">현재가 / 등락률</th><th class="th-num">' + (manageMode ? "관리" : "주문") + "</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table></div></section>";
   }
@@ -374,6 +413,13 @@
   }
 
   function bindEvents() {
+    document.querySelectorAll("[data-theme-set]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        applyTheme(btn.getAttribute("data-theme-set"));
+        render();
+      });
+    });
+
     const resetBtn = document.getElementById("resetBtn");
     if (resetBtn) resetBtn.addEventListener("click", () => {
       if (!window.confirm("보유 종목과 거래 내역을 모두 초기화할까요?")) return;
